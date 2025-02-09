@@ -6,4 +6,4 @@ This is the implementation for the paper **Multi-physics Simulation Guided Gener
 ## Generated video
 
 ### 1. Fluid dynamics
-[![AM surface](generated_video/heatvideo01.avi)]
+<video src='generated_video/heatvideo01.avie' width=180/>
