@@ -11,7 +11,7 @@ This repository contains the official implementation of the paper:
 ![Fluid video](generated_video/smoke.gif)
 
 ### Laser-Based Metal Additive Manufacturing (LBMAM) Process
-![3D printing video](generated_video/meltpool.gif)
+![3D printing video](generated_video/meltpools.gif)
 
 You can also generate the videos locally by running:
 ```bash
