@@ -13,7 +13,13 @@ This repository contains the official implementation of the paper:
 ### Laser-Based Metal Additive Manufacturing (LBMAM) Process
 ![3D printing video](generated_video/meltpools.gif)
 
-You can also generate the videos locally by running:
+You can also generate the videos locally. 
+
+First, the zipped pretrained models should be unzipped by running
+```bash
+unzip models/*.zip
+```
+by running:
 ```bash
 python make_heat_video.py
 ```
@@ -38,3 +44,4 @@ To train the diffusion-based denoising U-Net models, simply run:
 python train.py
 ```
 
+## 📁 File Organization
