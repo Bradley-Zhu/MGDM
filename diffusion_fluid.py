@@ -52,27 +52,13 @@ def normalize_tensor(tensor):
     channel_max = tensor.amax(dim=(0, 2, 3), keepdim=True)  # Max across N, H, W for each channel
     print(channel_min,channel_max)
     return
-    # Normalize to [0, 1]
-    normalized_tensor = (tensor - channel_min) / (channel_max - channel_min + 1e-8)
-
-    # Scale to [-1, 1]
-    scaled_tensor = normalized_tensor * 2 - 1
-
-    return scaled_tensor
+    
 
 def gen_train_test_dataset(intermediate_path='fluid_data_gen/new_dataset/',suffix=['01','001','0001','00001'],preprocess=0,train_ratio=0.9,args={}):
-    
     
     # reshape data into desired shape
     cs1_list, cs2_list, init_context_list, data_list, temps_list = read_r_data(intermediate_path)
     
-
-    '''
-    cs2_list = torch.cat(blist_m, dim=0)[:,-1:]
-    init_context_list = torch.cat(blist_h, dim=0)[:,0:1]
-    init_context_list = torch.cat((init_context_list,torch.cat(rotlist_h, dim=0).unsqueeze(1)),dim=1)
-    data_list = torch.cat(blist_h, dim=0)[:,1:]
-    '''
     # normalization
     if True:
         with torch.no_grad():
@@ -155,49 +141,6 @@ def plot_bouyancy(trajectory, physics_context, cs2, gt_data,savename):
             axes[i,3+j].axis('off')   
     plt.savefig(savename,bbox_inches='tight')
 
-
-def sampling_with_physics(unet,beta,alpha,baralpha,timelist,epoch,rdata,args):
-    device=args['device']
-    with torch.no_grad():
-        initial_context, c1_context, c2_context, odata, phs_time = rdata[0].to(device), rdata[1].to(device), rdata[2].to(device), rdata[3].to(device), rdata[4].to(device)
-                
-        initial_context = args['encode_initial_context'](initial_context)
-        physics_context = args['encode_physics_context'](c1_context)
-        data = args['encode_data'](odata)    
-    bs, dt, w, h = data.shape        
-    
-    sigma = torch.sqrt(beta)
-    Time = len(alpha)
-    
-    time_span = 200
-    # (b dt) 1 w h
-    xt = torch.randn(data.shape, device=beta.device)
-    with torch.no_grad():
-        trajectory = [xt]
-        print('Sampling in epoch %s ...'%epoch)
-        for tid in tqdm(range(Time-1,-1,-1)):
-            t = timelist[tid:(tid+1)]
-            if not args['physics_guided']:
-                physics_context *= 0
-            #print(xt.shape)
-            #print(physics_context.shape)
-            #print(init_context.shape)
-            inputts = torch.cat((xt, physics_context, initial_context,) ,dim=1)
-            #inputdata = torch.cat((inputdata, physics_context, initial_context,) ,dim=1)
-            #print(t.shape)
-            #print(phs_time.shape)
-            #input()
-            xt = 1/torch.sqrt(alpha[t])*(xt - (1-alpha[t])/(torch.sqrt(1-baralpha[t]))*unet(inputts,t.repeat(len(phs_time)),phs_time[:,0]))
-            xt += sigma[t] * torch.randn(data.shape, device=beta.device)
-            if t%time_span == 0:
-                trajectory.append(args['decode_data'](xt))
-        trajectory.append(args['decode_data'](xt))
-    savename = 'samples/fluid_vortex_%s_epoch_%s.png'%(args['plot_vortex'],epoch)
-    
-    plot_bouyancy(trajectory, physics_context, c2_context, odata, savename)
-
-
-
 def expensive_physics_loss(cs2, x, wall=None):
     if wall is None:
         pooled = cs2-F.avg_pool2d((x), kernel_size=(2, 2), stride=(2, 2))
@@ -205,13 +148,6 @@ def expensive_physics_loss(cs2, x, wall=None):
         pooled = cs2-F.avg_pool2d((x)*wall[:,None,:,:], kernel_size=(4, 4), stride=(4, 4))
     return torch.sum(pooled**2)
 
-def fourier_low_frequency_loss(cs2, x, wall=None):
-    xk = torch.fft.fft2(x, dim=(-2, -1))
-    csk = torch.fft.fft2(cs2, dim=(-2, -1))
-    _,_,n1,n2 = xk.shape
-    n1 = n1//4
-    n2 = n2//4
-    return 0.0001*torch.norm(xk[:,:,:n1,:n2]-csk[:,:,:n1,:n2])**2
 
 def full_sample(unet,beta,alpha,baralpha,timelist,epoch,rdata,args,SAVEPLOT = False):
     device=args['device']
@@ -382,14 +318,12 @@ def train(unet, trainds, testds, args):
         
         if epoch % 10 == 0 or epoch < 10:
             for tdata in testdl:
-                #sampling_with_physics(unet, beta_list,alpha_list,bar_alpha_list,timelist, epoch, tdata, args)
                 image_array,_ = full_sample(unet,beta_list,alpha_list,bar_alpha_list,timelist,epoch,tdata,args,SAVEPLOT = True)
                 break
             torch.save(unet.state_dict(), 'models/model_fluid_smoke_%s_%s_ldm_%s.pth'%('' if args['physics_guided'] else '_nophysique',args['net'],args['ldm']))
         else:
             image_array == []   
         if args['use_wandb']:
-            
             for ii in range(len(image_array)):
                 msg['sample_%s'%ii] = wandb.Image(image_array[ii,0], caption="Sample %s"%ii)
 
@@ -410,9 +344,7 @@ def eval(unet,testds,args):
     epoch = -1
     evallist = []
     for tdata in tqdm(testdl):
-   
         _, res_dict = full_sample(unet, beta_list,alpha_list,bar_alpha_list,timelist, epoch, tdata,args,SAVEPLOT=True)
-
         evallist.append(res_dict)
         #break
         #return
@@ -515,7 +447,7 @@ def fluid_example():
         except:
             print("wandb failed to initialize or connect")
         
-    #train(dit,train_dataset,test_dataset,args)
+    train(dit,train_dataset,test_dataset,args)
     #return
     if args['use_wandb']:
         try:
