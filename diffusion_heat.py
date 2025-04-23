@@ -182,6 +182,7 @@ def sequential_sample(unet,flownet,beta,alpha,baralpha,timelist,epoch,rdata,dinv
         
         #print('Sampling in epoch %s ...'%epoch)
         strength = 0.005
+        # the sub_physics_context is rearranged, so we need to transform it back
         sub_physics_context = torch.cat([physics_context[ii*data_time_window//2+j:ii*data_time_window//2+(j+1),:,:,:] for ii in range(bs)], dim=0)
         sub_physics_mask = genmask(sub_physics_context, 10,20).detach()
         
@@ -398,6 +399,12 @@ def sampling_with_physics(unet,beta,alpha,baralpha,timelist,epoch,rdata,dinvmat,
     data_time_window = ds.data_time_window
     
     data, heatsource, physics_context = ds.slice_data(rdata,device)
+    #print(data.shape)
+    #print(heatsource.shape)
+    #print(physics_context.shape)
+    #print('-'*15)
+    #input()
+
     # we only predict the second half
     physics_context = rearrange(physics_context[:,data_time_window//2:], 'b t w h -> (b t) 1 w h') 
     bs, dt, w, h = data.shape        
@@ -506,9 +513,9 @@ def eval(unet,ds,args):
 
     evallist = []
     for tdata in tqdm(testdl):        
-        #result_dict = sampling_with_physics(unet, beta_list,alpha_list,bar_alpha_list,timelist, -1, tdata, dinvmat, ds, args, True, True, True, flownet)
+        result_dict = sampling_with_physics(unet, beta_list,alpha_list,bar_alpha_list,timelist, -1, tdata, dinvmat, ds, args, True, True, True, flownet)
         #result_dict = sequential_sample(unet, flownet, beta_list,alpha_list,bar_alpha_list,timelist, -1, tdata, dinvmat, ds, args)
-        result_dict = sample_std(unet, flownet, beta_list,alpha_list,bar_alpha_list,timelist, -1, tdata, dinvmat, ds, args)
+        #result_dict = sample_std(unet, flownet, beta_list,alpha_list,bar_alpha_list,timelist, -1, tdata, dinvmat, ds, args)
 
         result_dict = torch.tensor(result_dict)
         #print(result_dict)

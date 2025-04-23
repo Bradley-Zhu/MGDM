@@ -1,11 +1,13 @@
 import numpy as np
 import torch
-from diffusion_composite_fluid import FluidDataset, SmokeDataset
+from diffusion_fluid_tase import gen_train_test_dataset
 from diffusion_heat_double import NISTDataset
 from architectures import Unet
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from tqdm.auto import tqdm
+import torch.nn.functional as F
+
 
 from utils import uxy_to_color
 from evaluations import mse_psnr_ssim
@@ -45,15 +47,20 @@ def test(unet, testdl, ds, args,SAVEFIG=True):
     device=args['device']
     metrics = []
     idx = 0
-    for rdata in tqdm(testdl):      
-        inputdata, data = args['slice_function'](rdata, device)
+    for rdata in tqdm(testdl):   
+        initial_context, c1_context, c2_context, odata, phs_time = rdata[0].to(device), rdata[1].to(device), rdata[2].to(device), rdata[3].to(device), rdata[4].to(device)
+                
+        inputdata = args['encode_initial_context'](initial_context)
+        data = args['encode_data'](odata)      
+        #inputdata, data = args['slice_function'](rdata, device)
+        
         with torch.no_grad():
-            predictions = unet_inference(unet,inputdata)
+            predictions = unet_inference(unet,inputdata,phs_time[:,0])
             if SAVEFIG and idx == 0:
                 idx += 1
                 plt.clf()
                 plt.close('all')
-                NIST = True
+                NIST = False
                 if NIST:
                     nbs = 1
                     num_tstamp=5
@@ -105,12 +112,12 @@ def test(unet, testdl, ds, args,SAVEFIG=True):
     return torch.mean(metrics, dim=0), torch.std(metrics, dim=0)
 
 
-def train(unet, ds, args):
+def train(unet, ds,testds, args):
     device=args['device']
     #assert len(ds) >= 100, 'you should have at least 100 images in your folder. at least 10k images recommended'
     trainlen = int(len(ds)*args['trainratio'])
-    dl = DataLoader(ds[:trainlen], batch_size = args['train_batch_size'], shuffle = True, pin_memory = True, num_workers = cpu_count())
-    testdl = DataLoader(ds[trainlen:], batch_size = args['train_batch_size'], shuffle = False, pin_memory = True, num_workers = cpu_count())
+    dl = DataLoader(ds, batch_size = args['train_batch_size'], shuffle = True, pin_memory = True, num_workers = cpu_count())
+    testdl = DataLoader(testds, batch_size = args['train_batch_size'], shuffle = False, pin_memory = True, num_workers = cpu_count())
     opt = Adam(unet.parameters(), lr = args['train_lr'], weight_decay=5e-6)
 
     for epoch in range(args['num_epochs']):
@@ -122,9 +129,16 @@ def train(unet, ds, args):
             #data = rdata.to(device)
             #initial_context, physics_context, _, data = ds.slice_data(rdata, device)            
             #inputdata = initial_context
-            inputdata, data = args['slice_function'](rdata, device)
+            #inputdata, data = args['slice_function'](rdata, device)
+            initial_context, c1_context, c2_context, odata, phs_time = rdata[0].to(device), rdata[1].to(device), rdata[2].to(device), rdata[3].to(device), rdata[4].to(device)
+                
+            inputdata = args['encode_initial_context'](initial_context)
+            #physics_context = args['encode_physics_context'](c1_context)
+            data = args['encode_data'](odata)   
+            
+            #bs, dt, w, h = data.shape  
             try:
-                predictions = unet_inference(unet,inputdata)  
+                predictions = unet_inference(unet,inputdata,phs_time[:,0])  
             except:
                 print(data.shape)
                 #print(physics_context.shape)
@@ -153,6 +167,33 @@ def train(unet, ds, args):
     return 0
 
 
+def show_some_images(unet,testdataset,args):
+    device = args['device']
+    rdata = testdataset[[1,5,8,12]] 
+    initial_context, c1_context, c2_context, odata, phs_time = rdata[0].to(device), rdata[1].to(device), rdata[2].to(device), rdata[3].to(device), rdata[4].to(device)
+                
+    inputdata = args['encode_initial_context'](initial_context)
+    data = args['encode_data'](odata)      
+        
+    with torch.no_grad():
+        predictions = unet_inference(unet,inputdata,phs_time[:,0])
+
+    plt.clf()
+    plt.close('all')
+    NIST = False
+
+    pbs = 4
+    fig, axes = plt.subplots(pbs, 2, figsize=(2* 4, pbs * 4))
+    for i in range(pbs):
+        image = data[i,0].detach().cpu().numpy()
+        axes[i,0].imshow(-image, cmap='coolwarm')
+        axes[i,0].axis('off')
+
+        image = predictions[i,0].detach().cpu().numpy()
+        axes[i,1].imshow(-image, cmap='coolwarm')
+        axes[i,1].axis('off')
+    plt.savefig('samples/double_physics_fluid/pinn_new.png',bbox_inches='tight')
+
 
 def pinn_fluid():
     args = {
@@ -164,15 +205,21 @@ def pinn_fluid():
         'suffix':'fluid',
         'trainratio':0.9,
     }
-    dataset = SmokeDataset()
+    dataset, testdataset = gen_train_test_dataset()
     #analyze_kappa(dataset,args)
-    unet = Unet(channels=2, dim=64, out_dim=1).to(args['device'])
+    unet = Unet(channels=4, dim=64, out_dim=1).to(args['device'])
     def slice_function(rdata, device):
         initial_context, _, _, data = dataset.slice_data(rdata, device)            
         inputdata = initial_context
         return inputdata, data
     args['slice_function'] = slice_function
-    train(unet, dataset, args)
+    args['encode_initial_context'] = lambda initialcondition: F.avg_pool2d(initialcondition,kernel_size=2, stride=2)
+    args['encode_data'] = lambda data: F.avg_pool2d(data, kernel_size=2, stride=2)
+    args['encode_physics_context'] = lambda phy: F.interpolate(phy,size=(128,128), mode='bilinear', align_corners=False)
+    #train(unet, dataset, testdataset,args)
+    unet.load_state_dict(torch.load('models/model_pinn_fluid.pth'))
+    show_some_images(unet,testdataset,args)
+
 
 def pinn_nist():
     args = {
@@ -220,5 +267,5 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    #pinn_fluid()
-    pinn_nist()
+    pinn_fluid()
+    #pinn_nist()
