@@ -322,7 +322,7 @@ def train(unet, trainds, testds, args):
                 break
             torch.save(unet.state_dict(), 'models/model_fluid_smoke_%s_%s_ldm_%s.pth'%('' if args['physics_guided'] else '_nophysique',args['net'],args['ldm']))
         else:
-            image_array == []   
+            image_array = []   
         if args['use_wandb']:
             for ii in range(len(image_array)):
                 msg['sample_%s'%ii] = wandb.Image(image_array[ii,0], caption="Sample %s"%ii)
